@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply font-body bg-road-50 text-road-900 antialiased;
+    background-image:
+      radial-gradient(circle at 8% 8%, rgba(147, 200, 230, 0.35), transparent 40%),
+      radial-gradient(circle at 95% 15%, rgba(147, 200, 230, 0.25), transparent 35%);
+    background-attachment: fixed;
+  }
+  h1, h2, h3, h4 {
+    @apply font-display;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-road-300 rounded-full;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white/90 backdrop-blur rounded-3xl shadow-soft border border-road-100;
+  }
+  .road-divider {
+    @apply h-1 rounded-full bg-road-700 bg-dotted-road bg-repeat-x;
+    background-size: 26px 4px;
+  }
+}
