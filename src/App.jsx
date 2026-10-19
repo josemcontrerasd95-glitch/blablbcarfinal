@@ -1,11 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Car, Route, Luggage, Save, Trash2 } from 'lucide-react'
+import { Car, Route, Luggage, Cloud, CloudOff, Loader2, AlertTriangle, X, Trash2 } from 'lucide-react'
 import TransactionForm from './components/TransactionForm'
 import Dashboard from './components/Dashboard'
 import TransactionHistory from './components/TransactionHistory'
 import SummaryFooter from './components/SummaryFooter'
-import { initialMovements, MESES } from './data/mockData'
-import { loadMovements, saveMovements, clearMovements, generateId } from './utils/storage'
+import { MESES } from './data/mockData'
+import {
+  fetchMovements,
+  addMovement,
+  updateMovementPagado,
+  clearAllMovements,
+  generateId,
+  isCloudEnabled,
+} from './utils/storage'
 
 const monthKeyOf = (fecha) => fecha.slice(0, 7) // "YYYY-MM"
 const currentMonthKey = () => new Date().toISOString().slice(0, 7)
@@ -34,7 +41,7 @@ const shiftCurso = (cursoKey, delta) => {
 }
 
 // Dentro de un curso, elige el último mes con movimientos; si no hay
-// ninguno, cae en septiembre (primer mes del curso).
+// ninguno, cae en el mes actual (si pertenece a ese curso) o en septiembre.
 const pickMonthForCurso = (movementsList, cursoKey) => {
   const monthsInCurso = monthsOfCurso(cursoKey)
   const keysWithData = [...new Set(movementsList.map((m) => monthKeyOf(m.fecha)))]
@@ -44,57 +51,107 @@ const pickMonthForCurso = (movementsList, cursoKey) => {
   return monthsInCurso.includes(currentMonthKey()) ? currentMonthKey() : monthsInCurso[0]
 }
 
+const cloudEnabled = isCloudEnabled()
+
 export default function App() {
-  // Al arrancar, se recuperan los movimientos guardados en este navegador.
-  // Si no hay nada guardado todavía, se parte de una lista vacía.
-  const [movements, setMovements] = useState(() => loadMovements() ?? initialMovements)
+  const [movements, setMovements] = useState([])
   const [mode, setMode] = useState('global') // 'global' | 'mensual'
+  const [selectedCurso, setSelectedCurso] = useState(currentCursoKey)
+  const [selectedMonthKey, setSelectedMonthKey] = useState(currentMonthKey)
 
-  const [selectedCurso, setSelectedCurso] = useState(() => {
-    const loaded = loadMovements() ?? initialMovements
-    if (loaded.length === 0) return currentCursoKey()
-    const latest = [...loaded].sort((a, b) => (a.fecha < b.fecha ? 1 : -1))[0]
-    return cursoKeyOf(latest.fecha)
-  })
-
-  const [selectedMonthKey, setSelectedMonthKey] = useState(() => {
-    const loaded = loadMovements() ?? initialMovements
-    const curso = loaded.length === 0
-      ? currentCursoKey()
-      : cursoKeyOf([...loaded].sort((a, b) => (a.fecha < b.fecha ? 1 : -1))[0].fecha)
-    return pickMonthForCurso(loaded, curso)
-  })
-
+  const [loading, setLoading] = useState(true)
   const [justSaved, setJustSaved] = useState(false)
+  const [syncError, setSyncError] = useState(null)
 
-  // Cada vez que cambian los movimientos, se guardan automáticamente.
+  // Carga inicial: trae los movimientos de Supabase (o de este navegador si
+  // Supabase no está configurado) y se sitúa en el curso/mes más reciente.
   useEffect(() => {
-    saveMovements(movements)
-    if (movements.length === 0) return
-    setJustSaved(true)
-    const t = setTimeout(() => setJustSaved(false), 1600)
-    return () => clearTimeout(t)
-  }, [movements])
+    let cancelled = false
+    async function load() {
+      try {
+        const data = await fetchMovements()
+        if (cancelled) return
+        setMovements(data)
+        if (data.length > 0) {
+          const latest = [...data].sort((a, b) => (a.fecha < b.fecha ? 1 : -1))[0]
+          const curso = cursoKeyOf(latest.fecha)
+          setSelectedCurso(curso)
+          setSelectedMonthKey(pickMonthForCurso(data, curso))
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setSyncError(
+            cloudEnabled
+              ? 'No se pudieron cargar tus movimientos desde la nube. Comprueba tu conexión o la configuración de Supabase.'
+              : 'No se pudieron cargar tus movimientos guardados en este dispositivo.'
+          )
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
-  const handleAddMovement = (movement) => {
-    const newId = generateId()
-    setMovements((prev) => [...prev, { id: newId, ...movement }])
-    // Nos situamos automáticamente en el curso y el mes del nuevo movimiento.
+  const flashSaved = () => {
+    setJustSaved(true)
+    setTimeout(() => setJustSaved(false), 1600)
+  }
+
+  // Añade un movimiento: se muestra al instante (optimista) y, si falla el
+  // guardado remoto, se retira y se avisa.
+  const handleAddMovement = async (movementInput) => {
+    const movement = { id: generateId(), ...movementInput }
+    setMovements((prev) => [...prev, movement])
     setSelectedCurso(cursoKeyOf(movement.fecha))
     setSelectedMonthKey(monthKeyOf(movement.fecha))
+    setSyncError(null)
+
+    try {
+      await addMovement(movement)
+      flashSaved()
+    } catch (err) {
+      setMovements((prev) => prev.filter((m) => m.id !== movement.id))
+      setSyncError('No se ha podido guardar ese movimiento. Vuelve a intentarlo.')
+    }
   }
 
   // Cambia el estado Pendiente <-> Pagado de un ingreso "Particular".
-  const handleTogglePagado = (id) => {
-    setMovements((prev) => prev.map((m) => (m.id === id ? { ...m, pagado: !m.pagado } : m)))
+  const handleTogglePagado = async (id) => {
+    const current = movements.find((m) => m.id === id)
+    if (!current) return
+    const newPagado = !current.pagado
+
+    setMovements((prev) => prev.map((m) => (m.id === id ? { ...m, pagado: newPagado } : m)))
+    setSyncError(null)
+
+    try {
+      await updateMovementPagado(id, newPagado)
+      flashSaved()
+    } catch (err) {
+      setMovements((prev) => prev.map((m) => (m.id === id ? { ...m, pagado: current.pagado } : m)))
+      setSyncError('No se ha podido actualizar el estado de pago. Vuelve a intentarlo.')
+    }
   }
 
-  const handleClearAll = () => {
+  const handleClearAll = async () => {
     if (!window.confirm('¿Seguro que quieres borrar todos los movimientos guardados? Esta acción no se puede deshacer.')) return
-    clearMovements()
+
+    const previous = movements
     setMovements([])
-    setSelectedCurso(currentCursoKey())
-    setSelectedMonthKey(currentMonthKey())
+    setSyncError(null)
+
+    try {
+      await clearAllMovements()
+      setSelectedCurso(currentCursoKey())
+      setSelectedMonthKey(currentMonthKey())
+    } catch (err) {
+      setMovements(previous)
+      setSyncError('No se han podido borrar los datos. Vuelve a intentarlo.')
+    }
   }
 
   // Navega al curso anterior/siguiente (delta = -1 o 1) y reajusta el mes.
@@ -117,13 +174,14 @@ export default function App() {
 
   // Un único donut combinado: gastos en tonos de rojo, ingresos en tonos de verde.
   const combinedData = useMemo(() => {
-    const totals = { gasolina: 0, revision: 0, imprevistos: 0, blablacar: 0, particular: 0 }
+    const totals = { gasolina: 0, revision: 0, pasajero: 0, imprevistos: 0, blablacar: 0, particular: 0 }
     visibleMovements.forEach((m) => {
       totals[m.categoria] = (totals[m.categoria] ?? 0) + m.importe
     })
     return [
       { key: 'gasolina', name: 'Gasolina', value: Number(totals.gasolina.toFixed(2)), color: '#a3241d' },
-      { key: 'revision', name: 'Revisión', value: Number(totals.revision.toFixed(2)), color: '#e0483e' },
+      { key: 'revision', name: 'Revisión', value: Number(totals.revision.toFixed(2)), color: '#c62f27' },
+      { key: 'pasajero', name: 'Pasajero', value: Number(totals.pasajero.toFixed(2)), color: '#e0483e' },
       { key: 'imprevistos', name: 'Imprevistos', value: Number(totals.imprevistos.toFixed(2)), color: '#f4a9a2' },
       { key: 'blablacar', name: 'BlaBlaCar', value: Number(totals.blablacar.toFixed(2)), color: '#1c6636' },
       { key: 'particular', name: 'Particular', value: Number(totals.particular.toFixed(2)), color: '#5bc47f' },
@@ -176,12 +234,29 @@ export default function App() {
 
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <span
-              className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full bg-white/10 text-road-100 transition-opacity duration-500 ${
-                justSaved ? 'opacity-100' : 'opacity-60'
+              className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition-colors ${
+                cloudEnabled ? 'bg-income-500/20 text-income-50' : 'bg-white/10 text-road-100'
               }`}
+              title={
+                cloudEnabled
+                  ? 'Tus datos se guardan en Supabase y están disponibles en cualquier dispositivo en el que inicies esta app.'
+                  : 'Supabase no está configurado todavía: tus datos solo se guardan en este navegador. Mira el README para activar la sincronización.'
+              }
             >
-              <Save size={14} />
-              {justSaved ? 'Guardado en este dispositivo' : 'Tus datos se guardan automáticamente'}
+              {loading ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : cloudEnabled ? (
+                <Cloud size={14} />
+              ) : (
+                <CloudOff size={14} />
+              )}
+              {loading
+                ? 'Cargando tus movimientos...'
+                : cloudEnabled
+                ? justSaved
+                  ? 'Sincronizado en la nube'
+                  : 'Sincronización activa (todos tus dispositivos)'
+                : 'Guardado solo en este dispositivo'}
             </span>
             {movements.length > 0 && (
               <button
@@ -193,6 +268,23 @@ export default function App() {
               </button>
             )}
           </div>
+
+          {!cloudEnabled && !loading && (
+            <p className="mt-2.5 text-[11px] text-road-200/80 max-w-xl">
+              Para tener tus datos en el móvil y el ordenador a la vez, configura Supabase (VITE_SUPABASE_URL y
+              VITE_SUPABASE_ANON_KEY) — instrucciones en el README.
+            </p>
+          )}
+
+          {syncError && (
+            <div className="mt-3 flex items-start gap-2 rounded-xl bg-expense-500/15 border border-expense-400/30 text-expense-50 text-xs px-3.5 py-2.5 max-w-xl">
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+              <p className="flex-1">{syncError}</p>
+              <button onClick={() => setSyncError(null)} className="shrink-0 hover:text-white" aria-label="Cerrar aviso">
+                <X size={14} />
+              </button>
+            </div>
+          )}
         </div>
         <div className="road-divider" />
       </header>

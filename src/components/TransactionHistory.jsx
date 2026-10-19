@@ -1,9 +1,10 @@
 import React from 'react'
-import { Fuel, Wrench, AlertTriangle, Users, User, CheckCircle2, Clock, ListChecks } from 'lucide-react'
+import { Fuel, Wrench, AlertTriangle, Armchair, Users, User, CheckCircle2, Clock, ListChecks } from 'lucide-react'
 
 const iconMap = {
   gasolina: Fuel,
   revision: Wrench,
+  pasajero: Armchair,
   imprevistos: AlertTriangle,
   blablacar: Users,
   particular: User,
@@ -12,6 +13,7 @@ const iconMap = {
 const labelMap = {
   gasolina: 'Gasolina',
   revision: 'Revisión',
+  pasajero: 'Pasajero',
   imprevistos: 'Imprevistos',
   blablacar: 'BlaBlaCar',
   particular: 'Particular',

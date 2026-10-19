@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Fuel, Wrench, AlertTriangle, Users, Car, Plus, User, CheckCircle2, Clock } from 'lucide-react'
+import { Fuel, Wrench, AlertTriangle, Armchair, Users, Car, Plus, User, CheckCircle2, Clock } from 'lucide-react'
 import { GASTO_CATEGORIAS, INGRESO_CATEGORIAS } from '../data/mockData'
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
@@ -16,6 +16,7 @@ const emptyForm = {
 const gastoIcons = {
   gasolina: Fuel,
   revision: Wrench,
+  pasajero: Armchair,
   imprevistos: AlertTriangle,
 }
 
@@ -112,23 +113,24 @@ export default function TransactionForm({ onAddMovement }) {
         {isGasto ? (
           <div>
             <label className="block text-xs font-semibold text-road-600 mb-1.5">Categoría de gasto</label>
-            <div className="grid grid-cols-3 gap-2">
-              {GASTO_CATEGORIAS.map(({ value, label }) => {
+            <div className="grid grid-cols-2 gap-2">
+              {GASTO_CATEGORIAS.map(({ value, label, shortLabel }) => {
                 const Icon = gastoIcons[value]
                 const active = form.categoria === value
                 return (
                   <button
                     type="button"
                     key={value}
+                    title={label}
                     onClick={() => setForm({ ...form, categoria: value })}
-                    className={`flex flex-col items-center gap-1.5 py-3 rounded-xl text-xs font-medium border transition-all ${
+                    className={`flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-medium border transition-all ${
                       active
                         ? 'bg-expense-500 border-expense-500 text-white shadow-soft'
                         : 'bg-white border-road-100 text-road-500 hover:border-expense-300'
                     }`}
                   >
                     <Icon size={16} />
-                    {label}
+                    {shortLabel ?? label}
                   </button>
                 )
               })}
